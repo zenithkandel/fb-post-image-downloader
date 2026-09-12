@@ -5,16 +5,16 @@
 
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
 // Resolve directory
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Import JSDOM from scratch directory
-const scratchModules = 'C:\\Users\\zenith\\.gemini\\antigravity-ide\\brain\\5a32aca8-27a3-4968-88d2-a4d4e0a16974\\scratch\\node_modules';
-const jsdomPath = path.join(scratchModules, 'jsdom', 'lib', 'api.js');
-const { JSDOM } = await import(pathToFileURL(jsdomPath).href);
+const requireScratch = createRequire('C:\\Users\\zenith\\.gemini\\antigravity-ide\\brain\\5a32aca8-27a3-4968-88d2-a4d4e0a16974\\scratch\\package.json');
+const { JSDOM } = requireScratch('jsdom');
 
 // Import extension modules
 import { extractPostImages, extractAuthorName, deriveHighResUrl } from '../src/content/extractor.js';
@@ -98,7 +98,7 @@ assert(derivedUrl.includes('oh=00_ABC'), 'Cryptographic signature oh is preserve
 console.log('\nTest 4: Filename and extension utilities...');
 const dirtyName = 'John / Doe : "Summer 2026? <Party> | *';
 const cleanName = sanitizeFilename(dirtyName);
-assert(cleanName === 'John___Doe___Summer_2026___Party____', `Dirty filename sanitized to safe ASCII: "${cleanName}"`);
+assert(cleanName === 'John_Doe_Summer_2026_Party', `Dirty filename sanitized to safe ASCII: "${cleanName}"`);
 
 assert(detectExtension('https://fbcdn.net/test.jpg', 'image/jpeg') === 'jpg', 'MIME image/jpeg -> jpg');
 assert(detectExtension('https://fbcdn.net/test.png', 'image/png') === 'png', 'MIME image/png -> png');

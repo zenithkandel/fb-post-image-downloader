@@ -11,7 +11,7 @@ import { debugLog } from '../shared/utils.js';
  * Uses a multi-strategy hierarchy based on verified structural invariants.
  */
 export function findPostContainer(startElement) {
-  if (!startElement || !(startElement instanceof Element)) return null;
+  if (!startElement || typeof startElement.closest !== 'function') return null;
 
   // Strategy 1: Role landmark
   const article = startElement.closest(SELECTORS.POST_ARTICLE);
@@ -49,7 +49,7 @@ export function findPostContainer(startElement) {
  * Validates whether an element has the structural characteristics of a Facebook post
  */
 export function isValidPostContainer(el) {
-  if (!el || !(el instanceof Element)) return false;
+  if (!el || typeof el.querySelector !== 'function') return false;
 
   // Must have a menu trigger button or profile name
   const hasMenu = el.querySelector(SELECTORS.MENU_BUTTON) !== null;

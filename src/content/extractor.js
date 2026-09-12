@@ -152,16 +152,20 @@ export function deriveHighResUrl(url) {
 export function extractAuthorName(postElement) {
   if (!postElement) return 'facebook';
 
-  const profileEl = postElement.querySelector(SELECTORS.PROFILE_NAME);
-  if (profileEl) {
-    const text = profileEl.textContent.trim();
+  // Find the primary author link inside profile_name or h4
+  const authorAnchor =
+    postElement.querySelector(`${SELECTORS.PROFILE_NAME} a`) ||
+    postElement.querySelector('h4 a');
+
+  if (authorAnchor) {
+    const text = authorAnchor.textContent.trim();
     if (text) return sanitizeFilename(text);
   }
 
-  // Fallback to h4 link
-  const h4Anchor = postElement.querySelector('h4 a');
-  if (h4Anchor) {
-    const text = h4Anchor.textContent.trim();
+  // Fallback to profile container text
+  const profileEl = postElement.querySelector(SELECTORS.PROFILE_NAME);
+  if (profileEl) {
+    const text = profileEl.textContent.trim();
     if (text) return sanitizeFilename(text);
   }
 

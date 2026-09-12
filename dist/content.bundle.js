@@ -46,7 +46,7 @@
   }
   function sanitizeFilename(str, fallback = "facebook-image") {
     if (!str || typeof str !== "string") return fallback;
-    const sanitized = str.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").replace(/\s+/g, "_").slice(0, 100);
+    const sanitized = str.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").replace(/\s+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "").slice(0, 100);
     return sanitized.length > 0 ? sanitized : fallback;
   }
   function getFormattedDate(date = /* @__PURE__ */ new Date()) {
@@ -80,7 +80,7 @@
 
   // src/content/detector.js
   function findPostContainer(startElement) {
-    if (!startElement || !(startElement instanceof Element)) return null;
+    if (!startElement || typeof startElement.closest !== "function") return null;
     const article = startElement.closest(SELECTORS.POST_ARTICLE);
     if (article && isValidPostContainer(article)) {
       return article;
@@ -104,7 +104,7 @@
     return startElement.closest("div.html-div") || null;
   }
   function isValidPostContainer(el) {
-    if (!el || !(el instanceof Element)) return false;
+    if (!el || typeof el.querySelector !== "function") return false;
     const hasMenu = el.querySelector(SELECTORS.MENU_BUTTON) !== null;
     const hasProfile = el.querySelector(SELECTORS.PROFILE_NAME) !== null;
     if (!hasMenu && !hasProfile) return false;
@@ -170,7 +170,7 @@
 
   // src/content/extractor.js
   function extractPostImages(postElement) {
-    if (!postElement || !(postElement instanceof Element)) {
+    if (!postElement || typeof postElement.querySelectorAll !== "function") {
       return [];
     }
     debugLog("Extracting images from post:", postElement);
@@ -256,14 +256,14 @@
   }
   function extractAuthorName(postElement) {
     if (!postElement) return "facebook";
+    const authorAnchor = postElement.querySelector(`${SELECTORS.PROFILE_NAME} a`) || postElement.querySelector("h4 a");
+    if (authorAnchor) {
+      const text = authorAnchor.textContent.trim();
+      if (text) return sanitizeFilename(text);
+    }
     const profileEl = postElement.querySelector(SELECTORS.PROFILE_NAME);
     if (profileEl) {
       const text = profileEl.textContent.trim();
-      if (text) return sanitizeFilename(text);
-    }
-    const h4Anchor = postElement.querySelector("h4 a");
-    if (h4Anchor) {
-      const text = h4Anchor.textContent.trim();
       if (text) return sanitizeFilename(text);
     }
     return "facebook";

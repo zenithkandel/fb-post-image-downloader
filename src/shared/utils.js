@@ -22,6 +22,8 @@ export function sanitizeFilename(str, fallback = 'facebook-image') {
   const sanitized = str
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
     .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
     .slice(0, 100);
   return sanitized.length > 0 ? sanitized : fallback;
 }
