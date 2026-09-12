@@ -68,15 +68,42 @@ export function isValidPostContainer(el) {
  * Find the action controls area in the post header where the button can be injected
  */
 export function findHeaderActionSlot(postElement) {
-  if (!postElement) return null;
+  if (!postElement || typeof postElement.querySelector !== 'function') return null;
 
-  // Locate the three-dot menu button
-  const menuBtn = postElement.querySelector(SELECTORS.MENU_BUTTON);
-  if (!menuBtn) return null;
+  // 1. Locate the three-dot menu button specifically (excluding hide/close buttons)
+  const menuBtn =
+    postElement.querySelector('[aria-label^="Actions for this post"]') ||
+    postElement.querySelector('[aria-haspopup="menu"]:not([aria-label*="Hide"]):not([aria-label*="close" i])') ||
+    postElement.querySelector('[aria-haspopup="menu"][role="button"]') ||
+    postElement.querySelector('[aria-label*="Actions" i]') ||
+    postElement.querySelector('[aria-label*="More" i]');
 
-  // Return the immediate container of the menu button or its parent container
-  const slot = menuBtn.parentElement;
-  return slot || menuBtn;
+  if (menuBtn) {
+    const wrapper = menuBtn.parentElement;
+    const container = wrapper ? wrapper.parentElement : null;
+    return {
+      menuBtn,
+      wrapper,
+      container
+    };
+  }
+
+  // 2. Fallback: Locate the close/hide button container if 3-dots is absent
+  const closeBtn =
+    postElement.querySelector('[aria-label^="Hide"]') ||
+    postElement.querySelector('[aria-label*="close" i]');
+
+  if (closeBtn) {
+    const wrapper = closeBtn.parentElement;
+    const container = wrapper ? wrapper.parentElement : null;
+    return {
+      menuBtn: closeBtn,
+      wrapper,
+      container
+    };
+  }
+
+  return null;
 }
 
 /**
