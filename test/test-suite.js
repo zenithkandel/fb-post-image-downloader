@@ -173,9 +173,9 @@ assert(p3VisibleImages.length + extraDiscovered.length === 8, 'Full post gallery
 assert(progressCalls === 3, `Progress callback fired for each discovered photo (${progressCalls} times)`);
 
 // ----------------------------------------------------
-// TEST 3: High-Resolution URL Derivation
+// TEST 6: High-Resolution URL Derivation
 // ----------------------------------------------------
-console.log('\nTest 3: High-resolution URL derivation...');
+console.log('\nTest 6: High-resolution URL derivation...');
 const sampleClampedUrl = 'https://scontent.fna.fbcdn.net/v/t39.30808-6/photo.jpg?stp=dst-jpg_tt6&cstp=mx1638x2048&ctp=s640x640&_nc_cat=108&oh=00_ABC&oe=6AA';
 const derivedUrl = deriveHighResUrl(sampleClampedUrl);
 assert(!derivedUrl.includes('ctp=s640x640'), 'Client thumbnail parameter ctp=s640x640 is removed');
@@ -183,9 +183,9 @@ assert(derivedUrl.includes('cstp=mx1638x2048'), 'Maximum dimension cstp=mx1638x2
 assert(derivedUrl.includes('oh=00_ABC'), 'Cryptographic signature oh is preserved intact');
 
 // ----------------------------------------------------
-// TEST 4: Utility & Sanitization Checks
+// TEST 7: Utility & Sanitization Checks
 // ----------------------------------------------------
-console.log('\nTest 4: Filename and extension utilities...');
+console.log('\nTest 7: Filename and extension utilities...');
 const dirtyName = 'John / Doe : "Summer 2026? <Party> | *';
 const cleanName = sanitizeFilename(dirtyName);
 assert(cleanName === 'John_Doe_Summer_2026_Party', `Dirty filename sanitized to safe ASCII: "${cleanName}"`);
@@ -195,18 +195,18 @@ assert(detectExtension('https://fbcdn.net/test.png', 'image/png') === 'png', 'MI
 assert(detectExtension('https://fbcdn.net/test.webp', 'image/webp') === 'webp', 'MIME image/webp -> webp');
 
 // ----------------------------------------------------
-// TEST 5: Bundled Vendor Libraries Check
+// TEST 8: Bundled Vendor Libraries Check
 // ----------------------------------------------------
-console.log('\nTest 5: Validating locally bundled vendor libraries...');
+console.log('\nTest 8: Validating locally bundled vendor libraries...');
 const jszipFile = path.resolve(__dirname, '..', 'vendor', 'jszip.min.js');
 const jspdfFile = path.resolve(__dirname, '..', 'vendor', 'jspdf.umd.min.js');
 assert(fs.existsSync(jszipFile) && fs.statSync(jszipFile).size > 50000, `vendor/jszip.min.js exists (${fs.statSync(jszipFile).size} bytes)`);
 assert(fs.existsSync(jspdfFile) && fs.statSync(jspdfFile).size > 200000, `vendor/jspdf.umd.min.js exists (${fs.statSync(jspdfFile).size} bytes)`);
 
 // ----------------------------------------------------
-// TEST 6: Content Bundle Build Check
+// TEST 9: Content Bundle Build Check
 // ----------------------------------------------------
-console.log('\nTest 6: Validating compiled content bundle...');
+console.log('\nTest 9: Validating compiled content bundle...');
 const bundleFile = path.resolve(__dirname, '..', 'dist', 'content.bundle.js');
 assert(fs.existsSync(bundleFile) && fs.statSync(bundleFile).size > 20000, `dist/content.bundle.js exists (${fs.statSync(bundleFile).size} bytes)`);
 
