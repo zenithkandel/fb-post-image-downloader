@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "esbuild src/content/content.js --bundle --outfile=dist/content.bundle.js --format=iife",
-    "test": "node test/test-suite.js && node test/test-processing.js"
+    "test": "node test/test-suite.js && node test/test-processing.js && node test/test-ui.js"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

@@ -114,11 +114,28 @@
     return (hasMessage || hasPhotos) && (hasToolbar || hasMenu);
   }
   function findHeaderActionSlot(postElement) {
-    if (!postElement) return null;
-    const menuBtn = postElement.querySelector(SELECTORS.MENU_BUTTON);
-    if (!menuBtn) return null;
-    const slot = menuBtn.parentElement;
-    return slot || menuBtn;
+    if (!postElement || typeof postElement.querySelector !== "function") return null;
+    const menuBtn = postElement.querySelector('[aria-label^="Actions for this post"]') || postElement.querySelector('[aria-haspopup="menu"]:not([aria-label*="Hide"]):not([aria-label*="close" i])') || postElement.querySelector('[aria-haspopup="menu"][role="button"]') || postElement.querySelector('[aria-label*="Actions" i]') || postElement.querySelector('[aria-label*="More" i]');
+    if (menuBtn) {
+      const wrapper = menuBtn.parentElement;
+      const container = wrapper ? wrapper.parentElement : null;
+      return {
+        menuBtn,
+        wrapper,
+        container
+      };
+    }
+    const closeBtn = postElement.querySelector('[aria-label^="Hide"]') || postElement.querySelector('[aria-label*="close" i]');
+    if (closeBtn) {
+      const wrapper = closeBtn.parentElement;
+      const container = wrapper ? wrapper.parentElement : null;
+      return {
+        menuBtn: closeBtn,
+        wrapper,
+        container
+      };
+    }
+    return null;
   }
   function scanPosts(rootNode = document.body) {
     if (!rootNode || !(rootNode instanceof Element)) return [];
@@ -275,35 +292,84 @@
     const style = document.createElement("style");
     style.id = "fpid-injected-styles";
     style.textContent = `
-    /* Download button injected next to post three-dot menu */
+    /* Download button wrapper matching Facebook 36px icon button slots */
+    .fpid-btn-wrapper {
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      width: 36px !important;
+      height: 36px !important;
+      min-width: 36px !important;
+      min-height: 36px !important;
+      flex-shrink: 0 !important;
+      margin: 0 4px !important;
+      position: relative !important;
+      box-sizing: border-box !important;
+    }
+
+    /* Native-styled circular icon button */
     .${EXTENSION_CONFIG.BUTTON_CLASS} {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 10px;
-      margin-right: 6px;
-      border-radius: 6px;
-      border: 1px solid rgba(120, 130, 140, 0.25);
-      background-color: rgba(255, 255, 255, 0.08);
-      color: inherit;
-      font-size: 12px;
-      font-weight: 600;
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      vertical-align: middle;
-      user-select: none;
-      z-index: 10;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      width: 36px !important;
+      height: 36px !important;
+      min-width: 36px !important;
+      min-height: 36px !important;
+      border-radius: 50% !important;
+      border: none !important;
+      background-color: transparent !important;
+      color: var(--secondary-icon, #B0B3B8) !important;
+      cursor: pointer !important;
+      transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      outline: none !important;
+      position: relative !important;
+      user-select: none !important;
+      box-sizing: border-box !important;
     }
     .${EXTENSION_CONFIG.BUTTON_CLASS}:hover {
-      background-color: rgba(8, 102, 255, 0.15);
-      border-color: #0866FF;
-      color: #0866FF;
+      background-color: var(--hover-overlay, rgba(255, 255, 255, 0.1)) !important;
+      color: #0866FF !important;
+      transform: scale(1.08) !important;
+    }
+    .${EXTENSION_CONFIG.BUTTON_CLASS}:active {
+      transform: scale(0.95) !important;
     }
     .${EXTENSION_CONFIG.BUTTON_CLASS} svg {
-      width: 14px;
-      height: 14px;
-      fill: currentColor;
+      width: 20px !important;
+      height: 20px !important;
+      fill: currentColor !important;
+      display: block !important;
+    }
+
+    /* Floating Facebook-like tooltip */
+    .fpid-tooltip {
+      position: absolute;
+      top: 42px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.88);
+      color: #FFFFFF;
+      padding: 5px 9px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.15s ease, transform 0.15s ease;
+      z-index: 9999999;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      line-height: 1.2;
+    }
+    .fpid-btn-wrapper:hover .fpid-tooltip {
+      opacity: 1;
+      visibility: visible;
+      transform: translateX(-50%) translateY(2px);
     }
 
     /* Modal Overlay */
@@ -452,23 +518,30 @@
   }
   function createDownloadButton(onClick) {
     ensureStylesInjected();
+    const wrapper = document.createElement("div");
+    wrapper.className = "fpid-btn-wrapper";
     const btn = document.createElement("button");
     btn.className = EXTENSION_CONFIG.BUTTON_CLASS;
     btn.setAttribute("type", "button");
     btn.setAttribute("aria-label", "Download images from this post");
+    btn.setAttribute("title", "Download images");
     btn.innerHTML = `
-    <svg viewBox="0 0 16 16">
-      <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
-      <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+    <svg viewBox="0 0 20 20" width="20" height="20" fill="currentColor">
+      <path d="M10 2a.75.75 0 0 1 .75.75v8.69l2.72-2.72a.75.75 0 1 1 1.06 1.06l-4 4a.75.75 0 0 1-1.06 0l-4-4a.75.75 0 1 1 1.06-1.06l2.72 2.72V2.75A.75.75 0 0 1 10 2z"/>
+      <path d="M3.5 13.25a.75.75 0 0 1 .75.75v1.5c0 .414.336.75.75.75h10a.75.75 0 0 0 .75-.75v-1.5a.75.75 0 0 1 1.5 0v1.5A2.25 2.25 0 0 1 15 17.75H5A2.25 2.25 0 0 1 2.75 15.5v-1.5a.75.75 0 0 1 .75-.75z"/>
     </svg>
-    <span>Download images</span>
   `;
+    const tooltip = document.createElement("div");
+    tooltip.className = "fpid-tooltip";
+    tooltip.textContent = "Download images";
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       e.preventDefault();
       onClick();
     });
-    return btn;
+    wrapper.appendChild(btn);
+    wrapper.appendChild(tooltip);
+    return wrapper;
   }
   function showFormatModal({ imageCount, onSelectFormat, onCancel }) {
     ensureStylesInjected();
@@ -802,18 +875,33 @@
     if (!postElement || postElement.hasAttribute(EXTENSION_CONFIG.PROCESSED_ATTR)) {
       return;
     }
-    if (postElement.querySelector(`.${EXTENSION_CONFIG.BUTTON_CLASS}`)) {
+    if (postElement.querySelector(`.${EXTENSION_CONFIG.BUTTON_CLASS}`) || postElement.querySelector(".fpid-btn-wrapper")) {
       postElement.setAttribute(EXTENSION_CONFIG.PROCESSED_ATTR, "true");
       return;
     }
-    const slot = findHeaderActionSlot(postElement);
-    if (!slot) {
+    const slotData = findHeaderActionSlot(postElement);
+    if (!slotData || !slotData.container) {
       return;
     }
-    const btn = createDownloadButton(() => handleDownloadClick(postElement));
-    slot.parentElement.insertBefore(btn, slot);
+    const { container, wrapper } = slotData;
+    const btnWrapper = createDownloadButton(() => handleDownloadClick(postElement));
+    container.style.overflow = "visible";
+    container.style.display = "flex";
+    container.style.alignItems = "center";
+    Array.from(container.children).forEach((child) => {
+      if (child && child.style) {
+        child.style.flexShrink = "0";
+      }
+    });
+    if (wrapper && wrapper.parentElement === container) {
+      container.insertBefore(btnWrapper, wrapper);
+    } else if (container.firstChild) {
+      container.insertBefore(btnWrapper, container.firstChild);
+    } else {
+      container.appendChild(btnWrapper);
+    }
     postElement.setAttribute(EXTENSION_CONFIG.PROCESSED_ATTR, "true");
-    debugLog("Injected download action button into post.");
+    debugLog("Injected download action button into post header.");
   }
   function init() {
     debugLog("Facebook Post Image Downloader content script starting...");

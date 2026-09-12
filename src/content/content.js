@@ -143,22 +143,47 @@ function onPostDetected(postElement) {
   }
 
   // Prevent duplicate injections
-  if (postElement.querySelector(`.${EXTENSION_CONFIG.BUTTON_CLASS}`)) {
+  if (
+    postElement.querySelector(`.${EXTENSION_CONFIG.BUTTON_CLASS}`) ||
+    postElement.querySelector('.fpid-btn-wrapper')
+  ) {
     postElement.setAttribute(EXTENSION_CONFIG.PROCESSED_ATTR, 'true');
     return;
   }
 
-  const slot = findHeaderActionSlot(postElement);
-  if (!slot) {
+  const slotData = findHeaderActionSlot(postElement);
+  if (!slotData || !slotData.container) {
     return;
   }
 
-  const btn = createDownloadButton(() => handleDownloadClick(postElement));
+  const { container, wrapper } = slotData;
 
-  // Insert next to the three-dot button
-  slot.parentElement.insertBefore(btn, slot);
+  // Create our native-styled 36x36 circular button inside its wrapper
+  const btnWrapper = createDownloadButton(() => handleDownloadClick(postElement));
+
+  // Ensure the header action container has flexible bounds and does not clip
+  container.style.overflow = 'visible';
+  container.style.display = 'flex';
+  container.style.alignItems = 'center';
+
+  // Prevent flex squashing of sibling buttons (guarantees the 3-dots and X NEVER disappear!)
+  Array.from(container.children).forEach((child) => {
+    if (child && child.style) {
+      child.style.flexShrink = '0';
+    }
+  });
+
+  // Insert our button wrapper immediately to the left of the 3-dots button
+  if (wrapper && wrapper.parentElement === container) {
+    container.insertBefore(btnWrapper, wrapper);
+  } else if (container.firstChild) {
+    container.insertBefore(btnWrapper, container.firstChild);
+  } else {
+    container.appendChild(btnWrapper);
+  }
+
   postElement.setAttribute(EXTENSION_CONFIG.PROCESSED_ATTR, 'true');
-  debugLog('Injected download action button into post.');
+  debugLog('Injected download action button into post header.');
 }
 
 /**
