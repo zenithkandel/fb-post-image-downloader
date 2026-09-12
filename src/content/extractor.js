@@ -10,7 +10,7 @@ import { normalizeUrl, debugLog, sanitizeFilename } from '../shared/utils.js';
  * Extract all eligible image attachments belonging exclusively to postElement
  */
 export function extractPostImages(postElement) {
-  if (!postElement || !(postElement instanceof Element)) {
+  if (!postElement || typeof postElement.querySelectorAll !== 'function') {
     return [];
   }
 

@@ -1,0 +1,16 @@
+{
+  "name": "fb-post-image-downloader",
+  "version": "1.0.0",
+  "description": "Chrome Extension (MV3) to download images from Facebook posts as ZIP or PDF locally.",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/content/content.js --bundle --outfile=dist/content.bundle.js --format=iife",
+    "test": "node test/test-suite.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "jsdom": "^26.0.0"
+  },
+  "author": "Antigravity & Zenith",
+  "license": "MIT"
+}

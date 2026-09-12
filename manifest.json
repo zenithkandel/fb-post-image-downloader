@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Facebook Post Image Downloader",
+  "version": "1.0.0",
+  "description": "Download all images from any Facebook post as a ZIP archive or PDF document. 100% client-side, private, and local.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  },
+  "permissions": [
+    "downloads"
+  ],
+  "host_permissions": [
+    "*://*.facebook.com/*",
+    "*://*.fbcdn.net/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.facebook.com/*"
+      ],
+      "js": [
+        "vendor/jszip.min.js",
+        "vendor/jspdf.umd.min.js",
+        "dist/content.bundle.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
