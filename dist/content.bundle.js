@@ -303,6 +303,147 @@
     }
     return "facebook";
   }
+  function detectRemainingPhotosInfo(postElement) {
+    if (!postElement || typeof postElement.querySelectorAll !== "function") {
+      return null;
+    }
+    const photoAnchors = Array.from(
+      postElement.querySelectorAll('a[href*="/photo/"], a[href*="/photo.php"], a[href*="/photos/"]')
+    );
+    if (photoAnchors.length === 0) return null;
+    for (const anchor of photoAnchors) {
+      if (anchor.closest(`[${SELECTORS.HONEYPOT_ATTR}]`)) {
+        continue;
+      }
+      const textContent = anchor.textContent || "";
+      const badgeMatch = textContent.match(/\+(\d+)/);
+      const ariaLabel = anchor.getAttribute("aria-label") || "";
+      const ariaMatch = ariaLabel.match(/(\d+)\s+remaining\s+items/i);
+      const remainingCount = badgeMatch ? parseInt(badgeMatch[1], 10) : ariaMatch ? parseInt(ariaMatch[1], 10) : null;
+      if (remainingCount && remainingCount > 0) {
+        const href = anchor.getAttribute("href") || "";
+        const fbidMatch = href.match(/fbid=([0-9]+)/i);
+        const setMatch = href.match(/[?&]set=([^&]+)/i);
+        if (fbidMatch && setMatch) {
+          let firstFbid = null;
+          for (const firstAnchor of photoAnchors) {
+            const firstHref = firstAnchor.getAttribute("href") || "";
+            const m = firstHref.match(/fbid=([0-9]+)/i);
+            if (m) {
+              firstFbid = m[1];
+              break;
+            }
+          }
+          return {
+            remainingCount,
+            lastFbid: fbidMatch[1],
+            setId: decodeURIComponent(setMatch[1]),
+            firstFbid,
+            anchor
+          };
+        }
+      }
+    }
+    return null;
+  }
+  function extractImageFromPhotoHtml(html, fbid) {
+    if (!html || typeof html !== "string") return null;
+    const unescaped = html.replace(/\\\//g, "/");
+    const imgObjMatch = unescaped.match(/"image":\{"uri":"(https:\/\/[^"]+fbcdn\.net[^"]+)"/);
+    if (imgObjMatch) {
+      return imgObjMatch[1];
+    }
+    const prefetchMatch = unescaped.match(/"uri":"(https:\/\/[^"]+fbcdn\.net\/v\/t39\.30808-6\/[^"]+)"/);
+    if (prefetchMatch) {
+      return prefetchMatch[1];
+    }
+    if (fbid) {
+      const fbidRegex = new RegExp(`https://[a-z0-9.-]+\\.fbcdn\\.net/v/t39\\.30808-6/[^"'\\s]*${fbid}[^"'\\s]*`);
+      const fbidMatch = unescaped.match(fbidRegex);
+      if (fbidMatch) {
+        return fbidMatch[0];
+      }
+    }
+    const generalMatch = unescaped.match(/https:\/\/[a-z0-9.-]+\.fbcdn\.net\/v\/t39\.30808-6\/[a-zA-Z0-9_.-]+\.jpg[^"'\\\s]*/);
+    if (generalMatch) {
+      return generalMatch[0];
+    }
+    return null;
+  }
+  function extractNextFbidFromPhotoHtml(html) {
+    if (!html || typeof html !== "string") return null;
+    const nextMatch = html.match(/"nextMediaAfterNodeId":\{"__typename":"Photo","id":"(\d+)"/);
+    return nextMatch ? nextMatch[1] : null;
+  }
+  async function fetchRemainingSetPhotos({ lastFbid, setId, remainingCount = 0, firstFbid = null, maxItems = 50, startIndex = 5 }, onProgress = null, signal = null) {
+    if (!lastFbid || !setId) return [];
+    const discovered = [];
+    const visitedFbids = /* @__PURE__ */ new Set();
+    if (firstFbid) visitedFbids.add(firstFbid);
+    visitedFbids.add(lastFbid);
+    let currentFbid = lastFbid;
+    let currentIndex = startIndex;
+    let isFirstStep = true;
+    debugLog(`Starting media set traversal: lastFbid=${lastFbid}, setId=${setId}, remaining=${remainingCount}`);
+    while (discovered.length < maxItems) {
+      if (signal && signal.aborted) {
+        debugLog("Media set traversal aborted by signal.");
+        break;
+      }
+      const url = `https://www.facebook.com/photo/?fbid=${currentFbid}&set=${encodeURIComponent(setId)}`;
+      let html = "";
+      try {
+        const res = await fetch(url, {
+          headers: {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9"
+          },
+          signal: signal || void 0
+        });
+        if (!res.ok) {
+          debugLog(`Fetch returned HTTP ${res.status} for fbid ${currentFbid}`);
+          break;
+        }
+        html = await res.text();
+      } catch (err) {
+        if (err.name === "AbortError") {
+          debugLog("Media set traversal fetch aborted.");
+          break;
+        }
+        debugLog(`Error fetching photo page for fbid ${currentFbid}:`, err);
+        break;
+      }
+      const nextFbid = extractNextFbidFromPhotoHtml(html);
+      if (!isFirstStep) {
+        const rawImgUrl = extractImageFromPhotoHtml(html, currentFbid);
+        if (rawImgUrl) {
+          const highResUrl = deriveHighResUrl(rawImgUrl);
+          discovered.push({
+            index: currentIndex++,
+            fbid: currentFbid,
+            originalUrl: rawImgUrl,
+            highResUrl,
+            alt: "",
+            width: null,
+            height: null,
+            fromMediaSet: true
+          });
+          if (typeof onProgress === "function") {
+            onProgress(discovered.length, remainingCount);
+          }
+        }
+      }
+      isFirstStep = false;
+      if (!nextFbid || visitedFbids.has(nextFbid)) {
+        debugLog(`Media set traversal finished at nextFbid: ${nextFbid}`);
+        break;
+      }
+      visitedFbids.add(nextFbid);
+      currentFbid = nextFbid;
+    }
+    debugLog(`Discovered ${discovered.length} additional photos from media set.`);
+    return discovered;
+  }
 
   // src/content/ui.js
   function ensureStylesInjected() {
@@ -561,7 +702,7 @@
     wrapper.appendChild(tooltip);
     return wrapper;
   }
-  function showFormatModal({ imageCount, onSelectFormat, onCancel }) {
+  function showFormatModal({ imageCount, isScanning = false, onSelectFormat, onCancel }) {
     ensureStylesInjected();
     closeFormatModal();
     const modal = document.createElement("div");
@@ -569,9 +710,9 @@
     modal.innerHTML = `
     <div class="fpid-dialog" role="dialog" aria-modal="true">
       <h3>Download Images</h3>
-      <p class="fpid-subtitle">Found <strong>${imageCount}</strong> image${imageCount > 1 ? "s" : ""} attached to this post.</p>
+      <p class="fpid-subtitle" id="fpid-modal-subtitle">${isScanning ? "Scanning full post gallery for hidden photos..." : `Found <strong>${imageCount}</strong> image${imageCount > 1 ? "s" : ""} attached to this post.`}</p>
 
-      <div class="fpid-format-options" id="fpid-format-options-row">
+      <div class="fpid-format-options" id="fpid-format-options-row" style="${isScanning ? "display: none;" : ""}">
         <div class="fpid-format-card" id="fpid-choice-zip">
           <div class="fpid-format-title">ZIP Archive</div>
           <div class="fpid-format-desc">Save each image as a separate file. Best for saving original photos.</div>
@@ -582,13 +723,13 @@
         </div>
       </div>
 
-      <div class="fpid-progress-box" id="fpid-progress-box">
+      <div class="fpid-progress-box" id="fpid-progress-box" style="${isScanning ? "display: block;" : "display: none;"}">
         <div class="fpid-progress-label">
-          <span id="fpid-progress-status">Preparing download...</span>
-          <span id="fpid-progress-percent">0%</span>
+          <span id="fpid-progress-status">${isScanning ? `Discovering photos... (Found ${imageCount})` : "Preparing download..."}</span>
+          <span id="fpid-progress-percent">${isScanning ? "Scanning..." : "0%"}</span>
         </div>
         <div class="fpid-progress-bar-bg">
-          <div class="fpid-progress-bar-fill" id="fpid-progress-fill"></div>
+          <div class="fpid-progress-bar-fill" id="fpid-progress-fill" style="${isScanning ? "width: 60%;" : "width: 0%;"}"></div>
         </div>
       </div>
 
@@ -608,6 +749,31 @@
       if (onCancel) onCancel();
     });
     return {
+      updateScanningProgress(foundCount, totalEstimate) {
+        const statusEl = modal.querySelector("#fpid-progress-status");
+        const percentEl = modal.querySelector("#fpid-progress-percent");
+        const fillEl = modal.querySelector("#fpid-progress-fill");
+        if (statusEl) {
+          statusEl.textContent = `Discovered ${foundCount} photos...`;
+        }
+        if (percentEl) {
+          percentEl.textContent = totalEstimate > 0 ? `${Math.min(100, Math.round(foundCount / totalEstimate * 100))}%` : "Scanning...";
+        }
+        if (fillEl) {
+          const pct = totalEstimate > 0 ? Math.min(95, Math.round(foundCount / totalEstimate * 100)) : 75;
+          fillEl.style.width = `${pct}%`;
+        }
+      },
+      switchToFormatSelection(totalCount) {
+        const subtitleEl = modal.querySelector("#fpid-modal-subtitle");
+        const optionsRow = modal.querySelector("#fpid-format-options-row");
+        const progressBox = modal.querySelector("#fpid-progress-box");
+        if (subtitleEl) {
+          subtitleEl.innerHTML = `Found <strong>${totalCount}</strong> images attached to this post (full gallery retrieved).`;
+        }
+        if (progressBox) progressBox.style.display = "none";
+        if (optionsRow) optionsRow.style.display = "grid";
+      },
       updateProgress(current, total, statusText) {
         const optionsRow = modal.querySelector("#fpid-format-options-row");
         const progressBox = modal.querySelector("#fpid-progress-box");
@@ -794,20 +960,27 @@
   // src/content/content.js
   async function handleDownloadClick(postElement) {
     debugLog("Download action triggered for post:", postElement);
-    const images = extractPostImages(postElement);
+    let images = extractPostImages(postElement);
     if (!images || images.length === 0) {
       showToast("No downloadable images found in this post.");
       return;
     }
+    const remainingInfo = detectRemainingPhotosInfo(postElement);
+    const hasRemaining = Boolean(remainingInfo && remainingInfo.remainingCount > 0);
     const authorName = extractAuthorName(postElement);
     const timestamp = getFormattedDate();
     const baseFilename = `${authorName}-${timestamp}`;
+    let abortController = null;
+    if (hasRemaining) {
+      abortController = new AbortController();
+    }
     let modalControls = null;
     modalControls = showFormatModal({
       imageCount: images.length,
+      isScanning: hasRemaining,
       onSelectFormat: async (format) => {
         try {
-          debugLog(`Format selected: ${format}. Commencing image retrieval...`);
+          debugLog(`Format selected: ${format}. Commencing retrieval for ${images.length} images...`);
           const fetchResults = await fetchAllImages(images, (completed, total) => {
             modalControls.updateProgress(
               completed,
@@ -861,8 +1034,43 @@
       },
       onCancel: () => {
         debugLog("Download cancelled by user.");
+        if (abortController) {
+          abortController.abort();
+        }
       }
     });
+    if (hasRemaining) {
+      try {
+        const extraPhotos = await fetchRemainingSetPhotos(
+          {
+            lastFbid: remainingInfo.lastFbid,
+            setId: remainingInfo.setId,
+            remainingCount: remainingInfo.remainingCount,
+            firstFbid: remainingInfo.firstFbid,
+            startIndex: images.length
+          },
+          (foundCount, targetTotal) => {
+            modalControls.updateScanningProgress(images.length + foundCount, images.length + targetTotal);
+          },
+          abortController.signal
+        );
+        if (extraPhotos.length > 0) {
+          const existingFbids = new Set(images.map((img) => img.fbid).filter(Boolean));
+          const existingUrls = new Set(images.map((img) => img.originalUrl));
+          extraPhotos.forEach((photo) => {
+            if (photo.fbid && existingFbids.has(photo.fbid)) return;
+            if (existingUrls.has(photo.originalUrl)) return;
+            if (photo.fbid) existingFbids.add(photo.fbid);
+            existingUrls.add(photo.originalUrl);
+            images.push(photo);
+          });
+        }
+        modalControls.switchToFormatSelection(images.length);
+      } catch (err) {
+        debugLog("Error discovering remaining set photos:", err);
+        modalControls.switchToFormatSelection(images.length);
+      }
+    }
   }
   function downloadBlobLocally(blob, filename) {
     const blobUrl = URL.createObjectURL(blob);

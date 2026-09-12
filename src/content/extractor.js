@@ -171,3 +171,206 @@ export function extractAuthorName(postElement) {
 
   return 'facebook';
 }
+
+/**
+ * Detect if post has a "+N" remaining photos indicator or "remaining items" aria-label
+ * Returns metadata needed to traverse the media set, or null if all photos are visible.
+ */
+export function detectRemainingPhotosInfo(postElement) {
+  if (!postElement || typeof postElement.querySelectorAll !== 'function') {
+    return null;
+  }
+
+  const photoAnchors = Array.from(
+    postElement.querySelectorAll('a[href*="/photo/"], a[href*="/photo.php"], a[href*="/photos/"]')
+  );
+  if (photoAnchors.length === 0) return null;
+
+  for (const anchor of photoAnchors) {
+    if (anchor.closest(`[${SELECTORS.HONEYPOT_ATTR}]`)) {
+      continue;
+    }
+
+    // Check text for +N badge (e.g. "+4")
+    const textContent = anchor.textContent || '';
+    const badgeMatch = textContent.match(/\+(\d+)/);
+
+    // Check aria-label for "N remaining items" or "+N"
+    const ariaLabel = anchor.getAttribute('aria-label') || '';
+    const ariaMatch = ariaLabel.match(/(\d+)\s+remaining\s+items/i);
+
+    const remainingCount = badgeMatch
+      ? parseInt(badgeMatch[1], 10)
+      : (ariaMatch ? parseInt(ariaMatch[1], 10) : null);
+
+    if (remainingCount && remainingCount > 0) {
+      const href = anchor.getAttribute('href') || '';
+      const fbidMatch = href.match(/fbid=([0-9]+)/i);
+      const setMatch = href.match(/[?&]set=([^&]+)/i);
+
+      if (fbidMatch && setMatch) {
+        // Find the first fbid in this post for circular loop detection
+        let firstFbid = null;
+        for (const firstAnchor of photoAnchors) {
+          const firstHref = firstAnchor.getAttribute('href') || '';
+          const m = firstHref.match(/fbid=([0-9]+)/i);
+          if (m) {
+            firstFbid = m[1];
+            break;
+          }
+        }
+
+        return {
+          remainingCount,
+          lastFbid: fbidMatch[1],
+          setId: decodeURIComponent(setMatch[1]),
+          firstFbid,
+          anchor
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extract high-resolution image URL from a Facebook Comet photo viewer HTML response
+ */
+export function extractImageFromPhotoHtml(html, fbid) {
+  if (!html || typeof html !== 'string') return null;
+
+  const unescaped = html.replace(/\\\//g, '/');
+
+  // Priority 1: Direct "image":{"uri":"..."} object
+  const imgObjMatch = unescaped.match(/"image":\{"uri":"(https:\/\/[^"]+fbcdn\.net[^"]+)"/);
+  if (imgObjMatch) {
+    return imgObjMatch[1];
+  }
+
+  // Priority 2: prefetch_uris_v2 with t39.30808-6 or fbcdn.net
+  const prefetchMatch = unescaped.match(/"uri":"(https:\/\/[^"]+fbcdn\.net\/v\/t39\.30808-6\/[^"]+)"/);
+  if (prefetchMatch) {
+    return prefetchMatch[1];
+  }
+
+  // Priority 3: High-res t39.30808-6 URL containing the specific fbid
+  if (fbid) {
+    const fbidRegex = new RegExp(`https:\/\/[a-z0-9.-]+\\.fbcdn\\.net\/v\/t39\\.30808-6\/[^"'\\s]*${fbid}[^"'\\s]*`);
+    const fbidMatch = unescaped.match(fbidRegex);
+    if (fbidMatch) {
+      return fbidMatch[0];
+    }
+  }
+
+  // Priority 4: General t39.30808-6 jpg image
+  const generalMatch = unescaped.match(/https:\/\/[a-z0-9.-]+\.fbcdn\.net\/v\/t39\.30808-6\/[a-zA-Z0-9_.-]+\.jpg[^"'\\\s]*/);
+  if (generalMatch) {
+    return generalMatch[0];
+  }
+
+  return null;
+}
+
+/**
+ * Extract nextMediaAfterNodeId from a Facebook Comet photo viewer HTML response
+ */
+export function extractNextFbidFromPhotoHtml(html) {
+  if (!html || typeof html !== 'string') return null;
+  const nextMatch = html.match(/"nextMediaAfterNodeId":\{"__typename":"Photo","id":"(\d+)"/);
+  return nextMatch ? nextMatch[1] : null;
+}
+
+/**
+ * Sequentially traverse Facebook Comet media set to discover photos missing from feed DOM
+ */
+export async function fetchRemainingSetPhotos(
+  { lastFbid, setId, remainingCount = 0, firstFbid = null, maxItems = 50, startIndex = 5 },
+  onProgress = null,
+  signal = null
+) {
+  if (!lastFbid || !setId) return [];
+
+  const discovered = [];
+  const visitedFbids = new Set();
+  if (firstFbid) visitedFbids.add(firstFbid);
+  visitedFbids.add(lastFbid);
+
+  let currentFbid = lastFbid;
+  let currentIndex = startIndex;
+  let isFirstStep = true;
+
+  debugLog(`Starting media set traversal: lastFbid=${lastFbid}, setId=${setId}, remaining=${remainingCount}`);
+
+  while (discovered.length < maxItems) {
+    if (signal && signal.aborted) {
+      debugLog('Media set traversal aborted by signal.');
+      break;
+    }
+
+    const url = `https://www.facebook.com/photo/?fbid=${currentFbid}&set=${encodeURIComponent(setId)}`;
+    let html = '';
+
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9'
+        },
+        signal: signal || undefined
+      });
+
+      if (!res.ok) {
+        debugLog(`Fetch returned HTTP ${res.status} for fbid ${currentFbid}`);
+        break;
+      }
+
+      html = await res.text();
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        debugLog('Media set traversal fetch aborted.');
+        break;
+      }
+      debugLog(`Error fetching photo page for fbid ${currentFbid}:`, err);
+      break;
+    }
+
+    const nextFbid = extractNextFbidFromPhotoHtml(html);
+
+    // For photos beyond the initial visible ones, extract high-res image
+    if (!isFirstStep) {
+      const rawImgUrl = extractImageFromPhotoHtml(html, currentFbid);
+      if (rawImgUrl) {
+        const highResUrl = deriveHighResUrl(rawImgUrl);
+        discovered.push({
+          index: currentIndex++,
+          fbid: currentFbid,
+          originalUrl: rawImgUrl,
+          highResUrl: highResUrl,
+          alt: '',
+          width: null,
+          height: null,
+          fromMediaSet: true
+        });
+
+        if (typeof onProgress === 'function') {
+          onProgress(discovered.length, remainingCount);
+        }
+      }
+    }
+
+    isFirstStep = false;
+
+    // Halt when set completes, loops back, or no next photo
+    if (!nextFbid || visitedFbids.has(nextFbid)) {
+      debugLog(`Media set traversal finished at nextFbid: ${nextFbid}`);
+      break;
+    }
+
+    visitedFbids.add(nextFbid);
+    currentFbid = nextFbid;
+  }
+
+  debugLog(`Discovered ${discovered.length} additional photos from media set.`);
+  return discovered;
+}

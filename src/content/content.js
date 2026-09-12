@@ -6,7 +6,12 @@
 import { EXTENSION_CONFIG, FORMATS, MESSAGE_TYPES } from '../shared/constants.js';
 import { debugLog, getFormattedDate } from '../shared/utils.js';
 import { initPostObserver, findHeaderActionSlot } from './detector.js';
-import { extractPostImages, extractAuthorName } from './extractor.js';
+import {
+  extractPostImages,
+  extractAuthorName,
+  detectRemainingPhotosInfo,
+  fetchRemainingSetPhotos
+} from './extractor.js';
 import { createDownloadButton, showFormatModal, showToast } from './ui.js';
 import { fetchAllImages } from '../processing/fetcher.js';
 import { createZipArchive } from '../processing/zip.js';
@@ -18,25 +23,35 @@ import { createPdfDocument } from '../processing/pdf.js';
 async function handleDownloadClick(postElement) {
   debugLog('Download action triggered for post:', postElement);
 
-  // Extract images strictly belonging to this post
-  const images = extractPostImages(postElement);
+  // Extract initial images visible in the feed DOM
+  let images = extractPostImages(postElement);
 
   if (!images || images.length === 0) {
     showToast('No downloadable images found in this post.');
     return;
   }
 
+  // Check if this post has a +N badge or extra hidden photos in the set
+  const remainingInfo = detectRemainingPhotosInfo(postElement);
+  const hasRemaining = Boolean(remainingInfo && remainingInfo.remainingCount > 0);
+
   const authorName = extractAuthorName(postElement);
   const timestamp = getFormattedDate();
   const baseFilename = `${authorName}-${timestamp}`;
 
-  // Show format choice modal (ZIP or PDF)
+  let abortController = null;
+  if (hasRemaining) {
+    abortController = new AbortController();
+  }
+
+  // Show format choice modal, displaying scanning state if extra photos need to be resolved
   let modalControls = null;
   modalControls = showFormatModal({
     imageCount: images.length,
+    isScanning: hasRemaining,
     onSelectFormat: async (format) => {
       try {
-        debugLog(`Format selected: ${format}. Commencing image retrieval...`);
+        debugLog(`Format selected: ${format}. Commencing retrieval for ${images.length} images...`);
 
         // Fetch all images locally
         const fetchResults = await fetchAllImages(images, (completed, total) => {
@@ -97,8 +112,48 @@ async function handleDownloadClick(postElement) {
     },
     onCancel: () => {
       debugLog('Download cancelled by user.');
+      if (abortController) {
+        abortController.abort();
+      }
     }
   });
+
+  // If extra photos are hidden behind a +N badge, discover them in the background
+  if (hasRemaining) {
+    try {
+      const extraPhotos = await fetchRemainingSetPhotos(
+        {
+          lastFbid: remainingInfo.lastFbid,
+          setId: remainingInfo.setId,
+          remainingCount: remainingInfo.remainingCount,
+          firstFbid: remainingInfo.firstFbid,
+          startIndex: images.length
+        },
+        (foundCount, targetTotal) => {
+          modalControls.updateScanningProgress(images.length + foundCount, images.length + targetTotal);
+        },
+        abortController.signal
+      );
+
+      if (extraPhotos.length > 0) {
+        const existingFbids = new Set(images.map((img) => img.fbid).filter(Boolean));
+        const existingUrls = new Set(images.map((img) => img.originalUrl));
+
+        extraPhotos.forEach((photo) => {
+          if (photo.fbid && existingFbids.has(photo.fbid)) return;
+          if (existingUrls.has(photo.originalUrl)) return;
+          if (photo.fbid) existingFbids.add(photo.fbid);
+          existingUrls.add(photo.originalUrl);
+          images.push(photo);
+        });
+      }
+
+      modalControls.switchToFormatSelection(images.length);
+    } catch (err) {
+      debugLog('Error discovering remaining set photos:', err);
+      modalControls.switchToFormatSelection(images.length);
+    }
+  }
 }
 
 /**

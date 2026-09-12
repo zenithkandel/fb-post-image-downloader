@@ -279,7 +279,7 @@ export function createDownloadButton(onClick) {
 /**
  * Show format choice modal dialog
  */
-export function showFormatModal({ imageCount, onSelectFormat, onCancel }) {
+export function showFormatModal({ imageCount, isScanning = false, onSelectFormat, onCancel }) {
   ensureStylesInjected();
   closeFormatModal(); // Close any existing modal
 
@@ -288,9 +288,13 @@ export function showFormatModal({ imageCount, onSelectFormat, onCancel }) {
   modal.innerHTML = `
     <div class="fpid-dialog" role="dialog" aria-modal="true">
       <h3>Download Images</h3>
-      <p class="fpid-subtitle">Found <strong>${imageCount}</strong> image${imageCount > 1 ? 's' : ''} attached to this post.</p>
+      <p class="fpid-subtitle" id="fpid-modal-subtitle">${
+        isScanning
+          ? 'Scanning full post gallery for hidden photos...'
+          : `Found <strong>${imageCount}</strong> image${imageCount > 1 ? 's' : ''} attached to this post.`
+      }</p>
 
-      <div class="fpid-format-options" id="fpid-format-options-row">
+      <div class="fpid-format-options" id="fpid-format-options-row" style="${isScanning ? 'display: none;' : ''}">
         <div class="fpid-format-card" id="fpid-choice-zip">
           <div class="fpid-format-title">ZIP Archive</div>
           <div class="fpid-format-desc">Save each image as a separate file. Best for saving original photos.</div>
@@ -301,13 +305,13 @@ export function showFormatModal({ imageCount, onSelectFormat, onCancel }) {
         </div>
       </div>
 
-      <div class="fpid-progress-box" id="fpid-progress-box">
+      <div class="fpid-progress-box" id="fpid-progress-box" style="${isScanning ? 'display: block;' : 'display: none;'}">
         <div class="fpid-progress-label">
-          <span id="fpid-progress-status">Preparing download...</span>
-          <span id="fpid-progress-percent">0%</span>
+          <span id="fpid-progress-status">${isScanning ? `Discovering photos... (Found ${imageCount})` : 'Preparing download...'}</span>
+          <span id="fpid-progress-percent">${isScanning ? 'Scanning...' : '0%'}</span>
         </div>
         <div class="fpid-progress-bar-bg">
-          <div class="fpid-progress-bar-fill" id="fpid-progress-fill"></div>
+          <div class="fpid-progress-bar-fill" id="fpid-progress-fill" style="${isScanning ? 'width: 60%;' : 'width: 0%;'}"></div>
         </div>
       </div>
 
@@ -331,6 +335,33 @@ export function showFormatModal({ imageCount, onSelectFormat, onCancel }) {
   });
 
   return {
+    updateScanningProgress(foundCount, totalEstimate) {
+      const statusEl = modal.querySelector('#fpid-progress-status');
+      const percentEl = modal.querySelector('#fpid-progress-percent');
+      const fillEl = modal.querySelector('#fpid-progress-fill');
+
+      if (statusEl) {
+        statusEl.textContent = `Discovered ${foundCount} photos...`;
+      }
+      if (percentEl) {
+        percentEl.textContent = totalEstimate > 0 ? `${Math.min(100, Math.round((foundCount / totalEstimate) * 100))}%` : 'Scanning...';
+      }
+      if (fillEl) {
+        const pct = totalEstimate > 0 ? Math.min(95, Math.round((foundCount / totalEstimate) * 100)) : 75;
+        fillEl.style.width = `${pct}%`;
+      }
+    },
+    switchToFormatSelection(totalCount) {
+      const subtitleEl = modal.querySelector('#fpid-modal-subtitle');
+      const optionsRow = modal.querySelector('#fpid-format-options-row');
+      const progressBox = modal.querySelector('#fpid-progress-box');
+
+      if (subtitleEl) {
+        subtitleEl.innerHTML = `Found <strong>${totalCount}</strong> images attached to this post (full gallery retrieved).`;
+      }
+      if (progressBox) progressBox.style.display = 'none';
+      if (optionsRow) optionsRow.style.display = 'grid';
+    },
     updateProgress(current, total, statusText) {
       const optionsRow = modal.querySelector('#fpid-format-options-row');
       const progressBox = modal.querySelector('#fpid-progress-box');
