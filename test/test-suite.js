@@ -17,7 +17,15 @@ const requireScratch = createRequire('C:\\Users\\zenith\\.gemini\\antigravity-id
 const { JSDOM } = requireScratch('jsdom');
 
 // Import extension modules
-import { extractPostImages, extractAuthorName, deriveHighResUrl } from '../src/content/extractor.js';
+import {
+  extractPostImages,
+  extractAuthorName,
+  deriveHighResUrl,
+  detectRemainingPhotosInfo,
+  extractImageFromPhotoHtml,
+  extractNextFbidFromPhotoHtml,
+  fetchRemainingSetPhotos
+} from '../src/content/extractor.js';
 import { sanitizeFilename, detectExtension } from '../src/shared/utils.js';
 
 console.log('====================================================');
@@ -81,6 +89,88 @@ assert(indices.join(',') === '0,1,2,3', `Photos maintain exact grid display sequ
 
 const p2Author = extractAuthorName(post2Root);
 assert(p2Author === 'Mukesh_Chandra_Kushawaha', `Author extracted correctly: "${p2Author}" (Expected: "Mukesh_Chandra_Kushawaha")`);
+
+// ----------------------------------------------------
+// TEST 3: Multi-Photo Post with +N Overlay (Post 3: 5+4 Post)
+// ----------------------------------------------------
+console.log('\nTest 3: Multi-Photo Post with +N Overlay (Post 3: 5+4 Post)...');
+const post3Fixture = path.resolve(__dirname, 'fixtures', 'post_plus4.html');
+const post3Html = fs.readFileSync(post3Fixture, 'utf8');
+const dom3 = new JSDOM(post3Html);
+const post3Root = dom3.window.document.body.querySelector('.x1n2onr6.x1ja2u2z.x1jx94hy') || dom3.window.document.body.firstElementChild;
+
+const p3VisibleImages = extractPostImages(post3Root);
+assert(p3VisibleImages.length === 5, `Initial feed DOM yields 5 visible images (Found: ${p3VisibleImages.length})`);
+
+const p3Author = extractAuthorName(post3Root);
+assert(p3Author.includes('Multronics'), `Author extracted correctly: "${p3Author}"`);
+
+const remainingInfo = detectRemainingPhotosInfo(post3Root);
+assert(remainingInfo !== null, 'detectRemainingPhotosInfo detected +N badge in post');
+assert(remainingInfo.remainingCount === 4, `Detected +4 badge count (Expected: 4, Found: ${remainingInfo.remainingCount})`);
+assert(remainingInfo.lastFbid === '1508024811344239', `Detected correct 5th tile fbid: ${remainingInfo.lastFbid}`);
+assert(remainingInfo.setId === 'pcb.1508024968010890', `Detected correct media set ID: ${remainingInfo.setId}`);
+assert(remainingInfo.firstFbid === '1508024778010909', `Detected correct 1st tile fbid: ${remainingInfo.firstFbid}`);
+
+// ----------------------------------------------------
+// TEST 4: Photo Page Response Extraction Helpers
+// ----------------------------------------------------
+console.log('\nTest 4: Photo Page Response Extraction Helpers...');
+const samplePhotoHtml = `
+  {"__typename":"Photo","id":"1508024841344236","nextMediaAfterNodeId":{"__typename":"Photo","id":"1508024854677568"}}
+  "image":{"uri":"https:\\/\\/scontent.fktm17-1.fna.fbcdn.net\\/v\\/t39.30808-6\\/796332415_1508024864677567_3316887790749531966_n.jpg?stp=dst-jpg_tt6&cstp=mx1079x1350&ctp=s1079x1350&oh=00_TEST&oe=6AA","width":1079,"height":1350}
+`;
+const extractedNextId = extractNextFbidFromPhotoHtml(samplePhotoHtml);
+assert(extractedNextId === '1508024854677568', `extractNextFbidFromPhotoHtml: next id is "${extractedNextId}"`);
+
+const extractedImgUrl = extractImageFromPhotoHtml(samplePhotoHtml, '1508024841344236');
+assert(extractedImgUrl && extractedImgUrl.includes('796332415_1508024864677567'), 'extractImageFromPhotoHtml: extracted high-res CDN url');
+
+// ----------------------------------------------------
+// TEST 5: Media Set Traversal Simulation
+// ----------------------------------------------------
+console.log('\nTest 5: Media Set Traversal Simulation...');
+const originalFetch = globalThis.fetch;
+const mockPhotoPages = {
+  '1508024811344239': `{"nextMediaAfterNodeId":{"__typename":"Photo","id":"1508024841344236"}}`,
+  '1508024841344236': `{"nextMediaAfterNodeId":{"__typename":"Photo","id":"1508024854677568"},"image":{"uri":"https://scontent.fna.fbcdn.net/v/t39.30808-6/photo6.jpg?stp=dst-jpg&ctp=s1000x1000","width":1080,"height":1350}}`,
+  '1508024854677568': `{"nextMediaAfterNodeId":{"__typename":"Photo","id":"1508024871344233"},"image":{"uri":"https://scontent.fna.fbcdn.net/v/t39.30808-6/photo7.jpg?stp=dst-jpg&ctp=s1000x1000","width":1080,"height":1350}}`,
+  '1508024871344233': `{"nextMediaAfterNodeId":{"__typename":"Photo","id":"1508024778010909"},"image":{"uri":"https://scontent.fna.fbcdn.net/v/t39.30808-6/photo8.jpg?stp=dst-jpg&ctp=s1000x1000","width":1080,"height":1350}}`
+};
+
+let progressCalls = 0;
+globalThis.fetch = async (url) => {
+  const fbidMatch = url.match(/fbid=(\d+)/);
+  const fbid = fbidMatch ? fbidMatch[1] : '';
+  const body = mockPhotoPages[fbid] || '';
+  return {
+    ok: true,
+    status: 200,
+    text: async () => body
+  };
+};
+
+const extraDiscovered = await fetchRemainingSetPhotos(
+  {
+    lastFbid: remainingInfo.lastFbid,
+    setId: remainingInfo.setId,
+    remainingCount: remainingInfo.remainingCount,
+    firstFbid: remainingInfo.firstFbid,
+    startIndex: p3VisibleImages.length
+  },
+  (found, total) => {
+    progressCalls++;
+  }
+);
+
+globalThis.fetch = originalFetch; // restore fetch
+
+assert(extraDiscovered.length === 3, `Discovered 3 additional missing photos (Found: ${extraDiscovered.length})`);
+assert(extraDiscovered[0].fbid === '1508024841344236', 'Discovered Photo 6 (fbid=1508024841344236)');
+assert(extraDiscovered[1].fbid === '1508024854677568', 'Discovered Photo 7 (fbid=1508024854677568)');
+assert(extraDiscovered[2].fbid === '1508024871344233', 'Discovered Photo 8 (fbid=1508024871344233)');
+assert(p3VisibleImages.length + extraDiscovered.length === 8, 'Full post gallery total: exactly 8 photos retrieved!');
+assert(progressCalls === 3, `Progress callback fired for each discovered photo (${progressCalls} times)`);
 
 // ----------------------------------------------------
 // TEST 3: High-Resolution URL Derivation
