@@ -161,25 +161,19 @@ function onPostDetected(postElement) {
   // Create our native-styled 36x36 circular button inside its wrapper
   const btnWrapper = createDownloadButton(() => handleDownloadClick(postElement));
 
-  // Ensure the header action container has flexible bounds and does not clip
-  container.style.overflow = 'visible';
-  container.style.display = 'flex';
-  container.style.alignItems = 'center';
-
-  // Prevent flex squashing of sibling buttons (guarantees the 3-dots and X NEVER disappear!)
-  Array.from(container.children).forEach((child) => {
-    if (child && child.style) {
-      child.style.flexShrink = '0';
-    }
-  });
-
-  // Insert our button wrapper immediately to the left of the 3-dots button
+  // Insert our button wrapper immediately to the left of the 3-dots action slot
   if (wrapper && wrapper.parentElement === container) {
     container.insertBefore(btnWrapper, wrapper);
   } else if (container.firstChild) {
     container.insertBefore(btnWrapper, container.firstChild);
   } else {
     container.appendChild(btnWrapper);
+  }
+
+  // Ensure button slots do not compress in flex layout
+  btnWrapper.style.flexShrink = '0';
+  if (wrapper && wrapper.style) {
+    wrapper.style.flexShrink = '0';
   }
 
   postElement.setAttribute(EXTENSION_CONFIG.PROCESSED_ATTR, 'true');

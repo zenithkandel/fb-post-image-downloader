@@ -116,26 +116,44 @@
   function findHeaderActionSlot(postElement) {
     if (!postElement || typeof postElement.querySelector !== "function") return null;
     const menuBtn = postElement.querySelector('[aria-label^="Actions for this post"]') || postElement.querySelector('[aria-haspopup="menu"]:not([aria-label*="Hide"]):not([aria-label*="close" i])') || postElement.querySelector('[aria-haspopup="menu"][role="button"]') || postElement.querySelector('[aria-label*="Actions" i]') || postElement.querySelector('[aria-label*="More" i]');
-    if (menuBtn) {
-      const wrapper = menuBtn.parentElement;
-      const container = wrapper ? wrapper.parentElement : null;
-      return {
-        menuBtn,
-        wrapper,
-        container
-      };
-    }
     const closeBtn = postElement.querySelector('[aria-label^="Hide"]') || postElement.querySelector('[aria-label*="close" i]');
-    if (closeBtn) {
-      const wrapper = closeBtn.parentElement;
-      const container = wrapper ? wrapper.parentElement : null;
-      return {
-        menuBtn: closeBtn,
-        wrapper,
-        container
-      };
+    const targetBtn = menuBtn || closeBtn;
+    if (!targetBtn) return null;
+    const profileAnchor = postElement.querySelector('[data-ad-rendering-role="profile_name"]') || postElement.querySelector("h4") || postElement.querySelector('a[role="link"]');
+    let headerRow = null;
+    let actionSlot = null;
+    if (profileAnchor) {
+      let curr = targetBtn;
+      while (curr && curr !== postElement) {
+        if (curr.parentElement && curr.parentElement.contains(profileAnchor)) {
+          headerRow = curr.parentElement;
+          actionSlot = curr;
+          break;
+        }
+        curr = curr.parentElement;
+      }
     }
-    return null;
+    if (!headerRow || !actionSlot) {
+      const p1 = targetBtn.parentElement;
+      const p2 = p1 ? p1.parentElement : null;
+      const p3 = p2 ? p2.parentElement : null;
+      if (p2 && p3 && (p3.classList.contains("x78zum5") || p3.children.length > 1)) {
+        actionSlot = p2;
+        headerRow = p3;
+      } else if (p1 && p2) {
+        actionSlot = p1;
+        headerRow = p2;
+      } else if (p1) {
+        actionSlot = targetBtn;
+        headerRow = p1;
+      }
+    }
+    if (!headerRow || !actionSlot) return null;
+    return {
+      menuBtn: targetBtn,
+      wrapper: actionSlot,
+      container: headerRow
+    };
   }
   function scanPosts(rootNode = document.body) {
     if (!rootNode || !(rootNode instanceof Element)) return [];
@@ -885,20 +903,16 @@
     }
     const { container, wrapper } = slotData;
     const btnWrapper = createDownloadButton(() => handleDownloadClick(postElement));
-    container.style.overflow = "visible";
-    container.style.display = "flex";
-    container.style.alignItems = "center";
-    Array.from(container.children).forEach((child) => {
-      if (child && child.style) {
-        child.style.flexShrink = "0";
-      }
-    });
     if (wrapper && wrapper.parentElement === container) {
       container.insertBefore(btnWrapper, wrapper);
     } else if (container.firstChild) {
       container.insertBefore(btnWrapper, container.firstChild);
     } else {
       container.appendChild(btnWrapper);
+    }
+    btnWrapper.style.flexShrink = "0";
+    if (wrapper && wrapper.style) {
+      wrapper.style.flexShrink = "0";
     }
     postElement.setAttribute(EXTENSION_CONFIG.PROCESSED_ATTR, "true");
     debugLog("Injected download action button into post header.");

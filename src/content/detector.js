@@ -78,32 +78,61 @@ export function findHeaderActionSlot(postElement) {
     postElement.querySelector('[aria-label*="Actions" i]') ||
     postElement.querySelector('[aria-label*="More" i]');
 
-  if (menuBtn) {
-    const wrapper = menuBtn.parentElement;
-    const container = wrapper ? wrapper.parentElement : null;
-    return {
-      menuBtn,
-      wrapper,
-      container
-    };
-  }
-
   // 2. Fallback: Locate the close/hide button container if 3-dots is absent
   const closeBtn =
     postElement.querySelector('[aria-label^="Hide"]') ||
     postElement.querySelector('[aria-label*="close" i]');
 
-  if (closeBtn) {
-    const wrapper = closeBtn.parentElement;
-    const container = wrapper ? wrapper.parentElement : null;
-    return {
-      menuBtn: closeBtn,
-      wrapper,
-      container
-    };
+  const targetBtn = menuBtn || closeBtn;
+  if (!targetBtn) return null;
+
+  // 3. Locate the header row: the flex container uniting the author/profile section
+  // with the action buttons (3-dots menu and/or close button).
+  const profileAnchor =
+    postElement.querySelector('[data-ad-rendering-role="profile_name"]') ||
+    postElement.querySelector('h4') ||
+    postElement.querySelector('a[role="link"]');
+
+  let headerRow = null;
+  let actionSlot = null;
+
+  if (profileAnchor) {
+    let curr = targetBtn;
+    while (curr && curr !== postElement) {
+      if (curr.parentElement && curr.parentElement.contains(profileAnchor)) {
+        headerRow = curr.parentElement;
+        actionSlot = curr;
+        break;
+      }
+      curr = curr.parentElement;
+    }
   }
 
-  return null;
+  // 4. Robust Fallback: If walking up to profileAnchor did not resolve, ascend hierarchy
+  if (!headerRow || !actionSlot) {
+    const p1 = targetBtn.parentElement;
+    const p2 = p1 ? p1.parentElement : null;
+    const p3 = p2 ? p2.parentElement : null;
+
+    if (p2 && p3 && (p3.classList.contains('x78zum5') || p3.children.length > 1)) {
+      actionSlot = p2;
+      headerRow = p3;
+    } else if (p1 && p2) {
+      actionSlot = p1;
+      headerRow = p2;
+    } else if (p1) {
+      actionSlot = targetBtn;
+      headerRow = p1;
+    }
+  }
+
+  if (!headerRow || !actionSlot) return null;
+
+  return {
+    menuBtn: targetBtn,
+    wrapper: actionSlot,
+    container: headerRow
+  };
 }
 
 /**
